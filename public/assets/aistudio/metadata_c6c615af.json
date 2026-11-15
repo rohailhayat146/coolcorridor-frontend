@@ -1,0 +1,74 @@
+{
+  "lst": {
+    "file": "lst.png",
+    "bounds": [
+      [
+        33.40265680802978,
+        -112.12837205289344
+      ],
+      [
+        33.493947329054336,
+        -112.01947976474324
+      ]
+    ],
+    "unit": "\u00b0C",
+    "display_min": 47.95463256835937,
+    "display_max": 58.44669067382813,
+    "valid_pixels": 108679,
+    "source": "Phoenix_2025_May_Sep_median_LST.tif"
+  },
+  "ndvi": {
+    "file": "ndvi.png",
+    "bounds": [
+      [
+        33.40265680802978,
+        -112.12837205289344
+      ],
+      [
+        33.493947329054336,
+        -112.01947976474324
+      ]
+    ],
+    "unit": "NDVI",
+    "display_min": 0.024645284339785578,
+    "display_max": 0.48651952981948804,
+    "valid_pixels": 108813,
+    "source": "Phoenix_2025_May_Sep_median_NDVI.tif"
+  },
+  "lst_coverage": {
+    "file": "lst_coverage.png",
+    "bounds": [
+      [
+        33.40265680802978,
+        -112.12837205289344
+      ],
+      [
+        33.493947329054336,
+        -112.01947976474324
+      ]
+    ],
+    "unit": "observations",
+    "display_min": 1.0,
+    "display_max": 19.0,
+    "valid_pixels": 108679,
+    "source": "Phoenix_2025_May_Sep_LST_observation_count.tif"
+  },
+  "ndvi_coverage": {
+    "file": "ndvi_coverage.png",
+    "bounds": [
+      [
+        33.40265680802978,
+        -112.12837205289344
+      ],
+      [
+        33.493947329054336,
+        -112.01947976474324
+      ]
+    ],
+    "unit": "observations",
+    "display_min": 1.0,
+    "display_max": 19.0,
+    "valid_pixels": 108813,
+    "source": "Phoenix_2025_May_Sep_NDVI_observation_count.tif"
+  }
+}

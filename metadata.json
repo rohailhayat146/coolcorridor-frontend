@@ -1,0 +1,6 @@
+{
+  "name": "CoolCorridor",
+  "description": "AI-powered, heat-aware urban walking route planner for Downtown Phoenix. Compare walking routes with satellite-derived environmental exposure proxies.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
