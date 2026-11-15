@@ -1,8 +1,8 @@
+
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 import { LocationPoint, RouteFeature } from '../types/routes';
 
 // Supabase project credentials
-// Default URL from existing Supabase deployment: https://ytbbxbtftsreqadvwxwn.supabase.co
 const SUPABASE_URL =
   (import.meta.env.VITE_SUPABASE_URL as string) ||
   'https://ytbbxbtftsreqadvwxwn.supabase.co';
@@ -13,21 +13,29 @@ const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder';
 
 export const isSupabaseConfigured = (): boolean => {
-  return (
-    !!import.meta.env.VITE_SUPABASE_ANON_KEY &&
-    import.meta.env.VITE_SUPABASE_ANON_KEY !== 'your-anon-key-here' &&
-    import.meta.env.VITE_SUPABASE_ANON_KEY !== ''
+  const key =
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+  return Boolean(
+    key &&
+    key !== 'your-anon-key-here' &&
+    key !== 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder'
   );
 };
 
-// Initialize client
-export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
+// Initialize Supabase client
+export const supabase: SupabaseClient = createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  }
+);
 
 // Database Interfaces
 export interface SavedRouteRecord {
@@ -50,13 +58,14 @@ export interface SavedRouteRecord {
   created_at?: string;
 }
 
+// Database category values must match the Supabase CHECK constraint.
 export type FeedbackCategory =
-  | 'General feedback'
-  | 'Routing feedback'
-  | 'Map feedback'
-  | 'Accuracy feedback'
-  | 'Suggestions'
-  | 'Bug reports';
+  | 'general'
+  | 'routing'
+  | 'map'
+  | 'accuracy'
+  | 'suggestion'
+  | 'bug_report';
 
 export interface FeedbackSubmission {
   id?: string;
@@ -67,9 +76,8 @@ export interface FeedbackSubmission {
   created_at?: string;
 }
 
-// Local Storage Keys for offline fallback/smooth UX
+// Local Storage Keys
 const LOCAL_HISTORY_KEY = 'coolcorridor_local_route_history';
-const LOCAL_FEEDBACK_KEY = 'coolcorridor_local_feedback';
 
 /* ==========================================================================
    AUTHENTICATION FUNCTIONS
@@ -84,10 +92,15 @@ export async function signUpWithEmail(email: string, password: string) {
       email,
       password,
     });
+
     if (error) throw error;
+
     return { data, error: null };
   } catch (err: any) {
-    return { data: null, error: err.message || 'Failed to sign up.' };
+    return {
+      data: null,
+      error: err.message || 'Failed to sign up.',
+    };
   }
 }
 
@@ -100,37 +113,40 @@ export async function signInWithEmail(email: string, password: string) {
       email,
       password,
     });
+
     if (error) throw error;
+
     return { data, error: null };
   } catch (err: any) {
-    return { data: null, error: err.message || 'Failed to log in.' };
+    return {
+      data: null,
+      error: err.message || 'Failed to log in.',
+    };
   }
 }
 
 /**
- * Continue as Guest using Supabase Anonymous Authentication
- * Guests are NOT prompted for email, password, name, or phone.
+ * Continue as Guest using genuine Supabase Anonymous Authentication.
+ * No email, password, or fabricated local user is created.
  */
 export async function signInAsGuest() {
   try {
-    // Supabase Anonymous sign-in
-    if (typeof supabase.auth.signInAnonymously === 'function') {
-      const { data, error } = await supabase.auth.signInAnonymously();
-      if (error) throw error;
-      return { data, error: null };
-    } else {
-      // Fallback if client version doesn't export signInAnonymously directly
-      const { data, error } = await (supabase.auth as any).signUp({
-        email: `guest_${Math.random().toString(36).substring(2, 10)}@coolcorridor.guest`,
-        password: `Guest_${Math.random().toString(36)}!`,
-      });
-      if (error) throw error;
-      return { data, error: null };
+    const { data, error } = await supabase.auth.signInAnonymously();
+
+    if (error) throw error;
+
+    if (!data.user?.id) {
+      throw new Error('Supabase did not return a valid guest user.');
     }
+
+    return { data, error: null };
   } catch (err: any) {
-    // If anonymous sign in encounters a network or credential barrier, provide a local guest session
-    console.warn('[Supabase Auth] Anonymous sign in note:', err);
-    return { data: null, error: err.message || 'Unable to establish anonymous session.' };
+    console.error('[Supabase Auth] Anonymous sign-in failed:', err);
+
+    return {
+      data: null,
+      error: err.message || 'Unable to establish an anonymous session.',
+    };
   }
 }
 
@@ -140,21 +156,32 @@ export async function signInAsGuest() {
 export async function signOutUser() {
   try {
     const { error } = await supabase.auth.signOut();
+
     if (error) throw error;
+
     return { error: null };
   } catch (err: any) {
-    return { error: err.message || 'Failed to sign out.' };
+    return {
+      error: err.message || 'Failed to sign out.',
+    };
   }
 }
 
 /**
- * Get current session user
+ * Get current authenticated Supabase user
  */
 export async function getCurrentUser(): Promise<User | null> {
   try {
-    const { data } = await supabase.auth.getUser();
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error) {
+      console.warn('[Supabase Auth] Could not retrieve current user:', error);
+      return null;
+    }
+
     return data?.user || null;
-  } catch {
+  } catch (err) {
+    console.warn('[Supabase Auth] User retrieval failed:', err);
     return null;
   }
 }
@@ -197,36 +224,55 @@ export async function saveRouteToHistory(params: {
     created_at: new Date().toISOString(),
   };
 
-  // Always save locally so history is instantly available for the current user
+  // Save locally for the current user's history
   try {
     const existingStr = localStorage.getItem(LOCAL_HISTORY_KEY) || '[]';
     const localList: SavedRouteRecord[] = JSON.parse(existingStr);
+
     localList.unshift(record);
-    localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(localList.slice(0, 50)));
+
+    localStorage.setItem(
+      LOCAL_HISTORY_KEY,
+      JSON.stringify(localList.slice(0, 50))
+    );
   } catch (e) {
     console.warn('[LocalStorage] Route history cache note:', e);
   }
 
-  // Persist to Supabase public.route_history
+  // Persist to Supabase
   try {
-    const { data, error } = await supabase.from('route_history').insert([record]).select();
+    const { data, error } = await supabase
+      .from('route_history')
+      .insert([record])
+      .select();
+
     if (error) {
-      console.warn('[Supabase] public.route_history sync notice:', error.message);
-      // If table has alternate column names or RLS blocks anon, local record is preserved
+      console.warn(
+        '[Supabase] Route history sync notice:',
+        error.message
+      );
     } else if (data && data[0]) {
-      return { data: data[0] as SavedRouteRecord, error: null };
+      return {
+        data: data[0] as SavedRouteRecord,
+        error: null,
+      };
     }
   } catch (err: any) {
-    console.warn('[Supabase] Exception saving route_history:', err);
+    console.warn('[Supabase] Exception saving route history:', err);
   }
 
-  return { data: record, error: null };
+  return {
+    data: record,
+    error: null,
+  };
 }
 
 /**
  * Fetch route history for a given user ID
  */
-export async function getRouteHistory(userId: string): Promise<SavedRouteRecord[]> {
+export async function getRouteHistory(
+  userId: string
+): Promise<SavedRouteRecord[]> {
   let serverRecords: SavedRouteRecord[] = [];
 
   try {
@@ -247,18 +293,30 @@ export async function getRouteHistory(userId: string): Promise<SavedRouteRecord[
   try {
     const existingStr = localStorage.getItem(LOCAL_HISTORY_KEY) || '[]';
     const localList: SavedRouteRecord[] = JSON.parse(existingStr);
-    const userLocal = localList.filter((item) => item.user_id === userId);
 
-    // Merge by unique ID
+    const userLocal = localList.filter(
+      (item) => item.user_id === userId
+    );
+
     const combined = [...serverRecords];
+
     userLocal.forEach((item) => {
-      if (!combined.some((c) => c.id === item.id || (c.created_at === item.created_at && c.distance === item.distance))) {
+      if (
+        !combined.some(
+          (c) =>
+            c.id === item.id ||
+            (c.created_at === item.created_at &&
+              c.distance === item.distance)
+        )
+      ) {
         combined.push(item);
       }
     });
 
     return combined.sort(
-      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+      (a, b) =>
+        new Date(b.created_at || 0).getTime() -
+        new Date(a.created_at || 0).getTime()
     );
   } catch {
     return serverRecords;
@@ -268,10 +326,21 @@ export async function getRouteHistory(userId: string): Promise<SavedRouteRecord[
 /**
  * Delete a route from history
  */
-export async function deleteRouteRecord(id: string, userId: string): Promise<boolean> {
+export async function deleteRouteRecord(
+  id: string,
+  userId: string
+): Promise<boolean> {
   // Remove from Supabase
   try {
-    await supabase.from('route_history').delete().eq('id', id).eq('user_id', userId);
+    const { error } = await supabase
+      .from('route_history')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.warn('[Supabase] Delete route error:', error.message);
+    }
   } catch (err) {
     console.warn('[Supabase] Delete route error:', err);
   }
@@ -280,7 +349,9 @@ export async function deleteRouteRecord(id: string, userId: string): Promise<boo
   try {
     const existingStr = localStorage.getItem(LOCAL_HISTORY_KEY) || '[]';
     const localList: SavedRouteRecord[] = JSON.parse(existingStr);
+
     const updated = localList.filter((item) => item.id !== id);
+
     localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(updated));
   } catch (e) {
     console.warn('[LocalStorage] Delete error:', e);
@@ -294,48 +365,113 @@ export async function deleteRouteRecord(id: string, userId: string): Promise<boo
    ========================================================================== */
 
 /**
- * Submit user feedback to public.feedback
+ * Submit feedback to public.feedback.
+ *
+ * The authenticated Supabase session determines user_id.
+ * Supabase generates the record ID and created_at timestamp.
+ * Success is returned only when the database insert succeeds.
  */
 export async function submitUserFeedback(params: {
-  userId: string;
   category: FeedbackCategory;
   rating?: number | null;
   message: string;
 }): Promise<{ success: boolean; error: string | null }> {
-  const { userId, category, rating, message } = params;
+  const { category, rating, message } = params;
 
-  if (!message.trim()) {
-    return { success: false, error: 'Please enter a message before submitting.' };
+  const trimmedMessage = message.trim();
+
+  if (!trimmedMessage) {
+    return {
+      success: false,
+      error: 'Please enter a message before submitting.',
+    };
   }
 
-  const payload: FeedbackSubmission = {
-    id: `fb_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-    user_id: userId,
-    category,
-    rating: rating || null,
-    message: message.trim(),
-    created_at: new Date().toISOString(),
-  };
-
-  // Cache locally
-  try {
-    const existing = JSON.parse(localStorage.getItem(LOCAL_FEEDBACK_KEY) || '[]');
-    existing.unshift(payload);
-    localStorage.setItem(LOCAL_FEEDBACK_KEY, JSON.stringify(existing.slice(0, 30)));
-  } catch (e) {
-    console.warn('[LocalStorage] Feedback cache notice:', e);
+  if (trimmedMessage.length < 3 || trimmedMessage.length > 2000) {
+    return {
+      success: false,
+      error: 'Your message must be between 3 and 2000 characters.',
+    };
   }
 
-  // Insert to Supabase public.feedback
+  if (
+    rating !== undefined &&
+    rating !== null &&
+    (!Number.isInteger(rating) || rating < 1 || rating > 5)
+  ) {
+    return {
+      success: false,
+      error: 'Rating must be a whole number between 1 and 5.',
+    };
+  }
+
+  const validCategories: FeedbackCategory[] = [
+    'general',
+    'routing',
+    'map',
+    'accuracy',
+    'suggestion',
+    'bug_report',
+  ];
+
+  if (!validCategories.includes(category)) {
+    return {
+      success: false,
+      error: 'Please select a valid feedback category.',
+    };
+  }
+
   try {
-    const { error } = await supabase.from('feedback').insert([payload]);
-    if (error) {
-      console.warn('[Supabase] public.feedback insert notice:', error.message);
-      // If table columns vary or RLS applies, local submission is recorded
+    // Verify the genuine Supabase session
+    const { data: authData, error: authError } =
+      await supabase.auth.getUser();
+
+    if (authError) throw authError;
+
+    const currentUser = authData.user;
+
+    if (!currentUser?.id) {
+      return {
+        success: false,
+        error: 'Your session could not be verified. Please sign in again.',
+      };
     }
-  } catch (err: any) {
-    console.warn('[Supabase] Exception submitting feedback:', err);
-  }
 
-  return { success: true, error: null };
+    // Do not supply id or created_at.
+    // Supabase generates both using the database defaults.
+    const payload = {
+      user_id: currentUser.id,
+      category,
+      rating: rating ?? null,
+      message: trimmedMessage,
+    };
+
+    const { error } = await supabase
+      .from('feedback')
+      .insert(payload);
+
+    if (error) {
+      console.error(
+        '[Supabase] Feedback insertion failed:',
+        error
+      );
+
+      return {
+        success: false,
+        error: error.message || 'Database rejected your feedback.',
+      };
+    }
+
+    return {
+      success: true,
+      error: null,
+    };
+  } catch (err: any) {
+    console.error('[Supabase] Feedback submission error:', err);
+
+    return {
+      success: false,
+      error: err.message || 'Unable to submit feedback.',
+    };
+  }
 }

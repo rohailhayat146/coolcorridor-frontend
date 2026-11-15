@@ -1,25 +1,39 @@
+
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   FeedbackCategory,
   submitUserFeedback,
-  getCurrentUser,
 } from '../services/supabase';
-import { MessageSquare, Star, Send, CheckCircle2, AlertCircle, Shield } from 'lucide-react';
+import {
+  MessageSquare,
+  Star,
+  Send,
+  CheckCircle2,
+  AlertCircle,
+  Shield,
+} from 'lucide-react';
 
-const CATEGORIES: FeedbackCategory[] = [
-  'General feedback',
-  'Routing feedback',
-  'Map feedback',
-  'Accuracy feedback',
-  'Suggestions',
-  'Bug reports',
+// Database values are lowercase slugs.
+// Labels are displayed separately in the interface.
+const CATEGORIES: {
+  value: FeedbackCategory;
+  label: string;
+}[] = [
+  { value: 'general', label: 'General feedback' },
+  { value: 'routing', label: 'Routing feedback' },
+  { value: 'map', label: 'Map feedback' },
+  { value: 'accuracy', label: 'Accuracy feedback' },
+  { value: 'suggestion', label: 'Suggestions' },
+  { value: 'bug_report', label: 'Bug reports' },
 ];
 
 export const FeedbackSection: React.FC = () => {
   const { user, isGuest, openAuthModal, loginAsGuest } = useAuth();
 
-  const [category, setCategory] = useState<FeedbackCategory>('General feedback');
+  const [category, setCategory] =
+    useState<FeedbackCategory>('general');
+
   const [rating, setRating] = useState<number | null>(null);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [message, setMessage] = useState('');
@@ -31,44 +45,74 @@ export const FeedbackSection: React.FC = () => {
     e.preventDefault();
     setErrorMsg(null);
 
-    if (!message.trim()) {
-      setErrorMsg('Please write your feedback message before submitting.');
+    const trimmedMessage = message.trim();
+
+    if (!trimmedMessage) {
+      setErrorMsg(
+        'Please write your feedback message before submitting.'
+      );
+      return;
+    }
+
+    if (trimmedMessage.length < 3 || trimmedMessage.length > 2000) {
+      setErrorMsg(
+        'Your message must be between 3 and 2000 characters.'
+      );
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      let activeUserId = user?.id;
-      if (!activeUserId) {
-        await loginAsGuest();
-        const current = await getCurrentUser();
-        activeUserId = current?.id || `guest_${Date.now()}`;
+      // Establish a genuine Supabase guest session if necessary.
+      if (!user?.id) {
+        const guestResult = await loginAsGuest();
+
+        if (guestResult.error) {
+          setErrorMsg(
+            guestResult.error ||
+              'Unable to establish a guest session. Please try again.'
+          );
+          return;
+        }
       }
 
-      const res = await submitUserFeedback({
-        userId: activeUserId || 'anonymous_user',
+      // The service verifies the actual Supabase session
+      // and obtains the authenticated user's UUID itself.
+      const result = await submitUserFeedback({
         category,
         rating,
-        message,
+        message: trimmedMessage,
       });
 
-      if (res.success) {
-        setSubmitted(true);
-        setMessage('');
-        setRating(null);
-      } else {
-        setErrorMsg(res.error || 'Failed to submit feedback.');
+      if (!result.success) {
+        setErrorMsg(
+          result.error || 'Failed to submit feedback. Please try again.'
+        );
+        return;
       }
+
+      setSubmitted(true);
+      setMessage('');
+      setRating(null);
+      setHoverRating(null);
+      setCategory('general');
     } catch (err: any) {
-      setErrorMsg(err.message || 'Submission error.');
+      console.error('[FeedbackSection] Submission error:', err);
+
+      setErrorMsg(
+        err?.message || 'An unexpected submission error occurred.'
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <section id="feedback" className="py-12 md:py-16 bg-[#F7F7F3] border-t border-[#E5E5DC]">
+    <section
+      id="feedback"
+      className="py-12 md:py-16 bg-[#F7F7F3] border-t border-[#E5E5DC]"
+    >
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="text-center max-w-2xl mx-auto mb-8">
@@ -76,11 +120,15 @@ export const FeedbackSection: React.FC = () => {
             <MessageSquare className="w-3.5 h-3.5" />
             <span>COMMUNITY & RESEARCH FEEDBACK</span>
           </div>
+
           <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#202522]">
             Help improve CoolCorridor
           </h2>
+
           <p className="text-xs sm:text-sm text-[#5A6860] mt-1.5 leading-relaxed">
-            Share field observations, sidewalk condition reports, or suggestions to calibrate our heat-aware routing model and pedestrian network data.
+            Share field observations, sidewalk condition reports, or
+            suggestions to calibrate our heat-aware routing model and
+            pedestrian network data.
           </p>
         </div>
 
@@ -91,16 +139,24 @@ export const FeedbackSection: React.FC = () => {
               <div className="w-12 h-12 bg-[#EBF1ED] text-[#385E48] rounded-full flex items-center justify-center mx-auto">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
+
               <h3 className="font-display text-lg font-bold text-[#202522]">
                 Feedback Received
               </h3>
+
               <p className="text-xs text-[#5A6860] max-w-md mx-auto leading-relaxed">
-                Thank you for contributing your observations to the Phoenix Urban Heat Lab. Your submission has been saved directly to our research database.
+                Thank you for contributing your observations to the
+                Phoenix Urban Heat Lab. Your submission has been saved
+                to our research database.
               </p>
+
               <div className="pt-3">
                 <button
                   type="button"
-                  onClick={() => setSubmitted(false)}
+                  onClick={() => {
+                    setSubmitted(false);
+                    setErrorMsg(null);
+                  }}
                   className="px-4 py-2 text-xs font-semibold text-[#385E48] hover:text-[#274333] hover:underline cursor-pointer"
                 >
                   Submit another response
@@ -113,13 +169,19 @@ export const FeedbackSection: React.FC = () => {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-[#F7F7F3] rounded-lg border border-[#E5E5DC] text-xs">
                 <div className="flex items-center gap-2 text-[#5A6860]">
                   <Shield className="w-4 h-4 text-[#385E48]" />
+
                   <span>
                     Submitting as:{' '}
                     <strong className="text-[#202522]">
-                      {user ? (isGuest ? 'Guest User' : user.email) : 'Guest (Instant)'}
+                      {user
+                        ? isGuest
+                          ? 'Guest User'
+                          : user.email || 'Registered User'
+                        : 'Guest (Instant)'}
                     </strong>
                   </span>
                 </div>
+
                 {!user && (
                   <button
                     type="button"
@@ -136,21 +198,24 @@ export const FeedbackSection: React.FC = () => {
                 <label className="block text-xs font-mono uppercase tracking-wider text-[#5A6860] mb-2 font-semibold">
                   Feedback Category
                 </label>
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {CATEGORIES.map((cat) => {
-                    const isSelected = category === cat;
+                    const isSelected = category === cat.value;
+
                     return (
                       <button
-                        key={cat}
+                        key={cat.value}
                         type="button"
-                        onClick={() => setCategory(cat)}
+                        onClick={() => setCategory(cat.value)}
+                        aria-pressed={isSelected}
                         className={`px-3 py-2 text-xs rounded-lg border text-left transition-colors cursor-pointer ${
                           isSelected
                             ? 'bg-[#EBF1ED] border-[#385E48] text-[#274333] font-semibold'
                             : 'bg-[#F7F7F3] border-[#E5E5DC] text-[#5A6860] hover:bg-[#F1F1EB]'
                         }`}
                       >
-                        {cat}
+                        {cat.label}
                       </button>
                     );
                   })}
@@ -163,7 +228,8 @@ export const FeedbackSection: React.FC = () => {
                   <label className="block text-xs font-mono uppercase tracking-wider text-[#5A6860] font-semibold">
                     Experience Rating (Optional)
                   </label>
-                  {rating && (
+
+                  {rating !== null && (
                     <button
                       type="button"
                       onClick={() => setRating(null)}
@@ -173,9 +239,12 @@ export const FeedbackSection: React.FC = () => {
                     </button>
                   )}
                 </div>
+
                 <div className="flex items-center gap-1.5">
                   {[1, 2, 3, 4, 5].map((star) => {
-                    const isFilled = (hoverRating || rating || 0) >= star;
+                    const isFilled =
+                      (hoverRating ?? rating ?? 0) >= star;
+
                     return (
                       <button
                         key={star}
@@ -185,17 +254,23 @@ export const FeedbackSection: React.FC = () => {
                         onMouseLeave={() => setHoverRating(null)}
                         className="p-1 text-zinc-300 hover:text-amber-500 transition-colors cursor-pointer"
                         aria-label={`Rate ${star} of 5 stars`}
+                        aria-pressed={rating === star}
                       >
                         <Star
                           className={`w-5 h-5 ${
-                            isFilled ? 'text-amber-500 fill-amber-500' : 'text-zinc-300'
+                            isFilled
+                              ? 'text-amber-500 fill-amber-500'
+                              : 'text-zinc-300'
                           }`}
                         />
                       </button>
                     );
                   })}
+
                   <span className="text-xs text-[#5A6860] ml-2">
-                    {rating ? `${rating} of 5 stars` : 'No rating selected'}
+                    {rating !== null
+                      ? `${rating} of 5 stars`
+                      : 'No rating selected'}
                   </span>
                 </div>
               </div>
@@ -205,19 +280,29 @@ export const FeedbackSection: React.FC = () => {
                 <label className="block text-xs font-mono uppercase tracking-wider text-[#5A6860] mb-1.5 font-semibold">
                   Your Message or Observation
                 </label>
+
                 <textarea
                   rows={4}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder="Describe sidewalk shading, thermal conditions along a route, inaccuracies, or general feedback..."
                   required
+                  minLength={3}
+                  maxLength={2000}
                   className="w-full p-3 text-xs bg-white border border-[#E5E5DC] rounded-lg text-[#202522] placeholder:text-[#5A6860]/60 focus:outline-none focus:border-[#385E48] focus:ring-1 focus:ring-[#385E48]"
                 />
+
+                <p className="text-[10px] text-[#5A6860] text-right mt-1">
+                  {message.length}/2000 characters
+                </p>
               </div>
 
               {/* Error Callout */}
               {errorMsg && (
-                <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs flex items-start gap-2">
+                <div
+                  role="alert"
+                  className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs flex items-start gap-2"
+                >
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   <span>{errorMsg}</span>
                 </div>
@@ -228,7 +313,7 @@ export const FeedbackSection: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2.5 bg-[#385E48] hover:bg-[#274333] disabled:bg-[#B8C7BE] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
+                  className="px-5 py-2.5 bg-[#385E48] hover:bg-[#274333] disabled:bg-[#B8C7BE] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? (
                     <>
