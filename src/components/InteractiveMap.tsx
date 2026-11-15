@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { RouteFeature, LocationPoint } from '../types/routes';
@@ -27,20 +28,20 @@ const SCENARIO_STYLES: Record<
   }
 > = {
   Shortest: {
-    color: '#334155', // Slate/charcoal
+    color: '#334155',
     label: 'Shortest Route',
     baseWeight: 4,
     activeWeight: 6.5,
     dashArray: '6, 5',
   },
   'Lower exposure (lambda=1)': {
-    color: '#6E8B68', // Muted olive/sage
+    color: '#6E8B68',
     label: 'Lower Exposure λ1',
     baseWeight: 4,
     activeWeight: 6.5,
   },
   'Lower exposure (lambda=2)': {
-    color: '#274333', // Deep forest green
+    color: '#274333',
     label: 'Lower Exposure λ2',
     baseWeight: 4.5,
     activeWeight: 7,
@@ -116,7 +117,10 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const baseTileLayerRef = useRef<L.TileLayer | null>(null);
-  const selectedSegmentLayerRef = useRef<L.Polyline | null>(null);
+
+  // Holds both the white outline and amber segment highlight.
+  const selectedSegmentLayerRef = useRef<L.FeatureGroup | null>(null);
+
   const routeLayersRef = useRef<{ [key: string]: L.Polyline }>({});
   const haloLayersRef = useRef<{ [key: string]: L.Polyline }>({});
   const markerLayersRef = useRef<{ origin?: L.Marker; destination?: L.Marker }>({});
@@ -148,7 +152,6 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     const container = mapContainerRef.current;
     if (!container || mapInstanceRef.current) return;
 
-    // Center on Downtown Phoenix (approx City Hall)
     const map = L.map(container, {
       center: [PHOENIX_STUDY_BOUNDS.centerLat, PHOENIX_STUDY_BOUNDS.centerLng],
       zoom: 14,
@@ -156,14 +159,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       attributionControl: true,
     });
 
-    // Zoom controls at top right
     L.control.zoom({ position: 'topright' }).addTo(map);
 
-    // Subtle 10x10 km study area boundary rectangle
     const bounds: L.LatLngBoundsLiteral = [
       [PHOENIX_STUDY_BOUNDS.minLat, PHOENIX_STUDY_BOUNDS.minLng],
       [PHOENIX_STUDY_BOUNDS.maxLat, PHOENIX_STUDY_BOUNDS.maxLng],
     ];
+
     const boundary = L.rectangle(bounds, {
       color: '#426B55',
       weight: 1,
@@ -173,21 +175,22 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       fillOpacity: 0.015,
       interactive: false,
     }).addTo(map);
+
     boundaryLayerRef.current = boundary;
 
-    // Invalidate size after layout settles to guarantee tile loading
     const resizeTimer = setTimeout(() => {
       map.invalidateSize();
     }, 150);
 
-    // ResizeObserver for dynamic layout changes
     let resizeObserver: ResizeObserver | null = null;
+
     if (typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver(() => {
         if (mapInstanceRef.current) {
           mapInstanceRef.current.invalidateSize();
         }
       });
+
       resizeObserver.observe(container);
     }
 
@@ -196,6 +199,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     return () => {
       clearTimeout(resizeTimer);
       if (resizeObserver) resizeObserver.disconnect();
+
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -204,14 +208,18 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   // Ensure map tiles and buildings never go blank when states change
   useEffect(() => {
     const map = mapInstanceRef.current;
+
     if (map) {
       map.invalidateSize({ pan: false });
+
       const raf = requestAnimationFrame(() => {
         map.invalidateSize({ pan: false });
       });
+
       const timer = setTimeout(() => {
         map.invalidateSize({ pan: false });
       }, 150);
+
       return () => {
         cancelAnimationFrame(raf);
         clearTimeout(timer);
@@ -250,6 +258,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           '[Map Diagnostic] Carto tile load error. Switching to OpenStreetMap fallback.',
           (e.tile as HTMLImageElement)?.src
         );
+
         setTileSource('osm');
       });
 
@@ -261,6 +270,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
       });
+
       layer.addTo(map);
       baseTileLayerRef.current = layer;
     }
@@ -279,11 +289,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
       if (isActive && !existingOverlay) {
         const cfg = ENV_LAYER_CONFIG[key];
+
         try {
           const overlay = L.imageOverlay(cfg.file, cfg.bounds, {
             opacity: 0.65,
             interactive: false,
           });
+
           overlay.addTo(map);
           overlay.bringToBack();
           overlayLayers[key] = overlay;
@@ -302,33 +314,61 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
 
+    // Remove the previous selected segment group.
     if (selectedSegmentLayerRef.current) {
       selectedSegmentLayerRef.current.remove();
       selectedSegmentLayerRef.current = null;
     }
 
-    if (selectedSegment) {
-      const segLatLngs: [number, number][] = [
-        [selectedSegment.startLat, selectedSegment.startLng],
-        [selectedSegment.endLat, selectedSegment.endLng],
-      ];
-      const highlight = L.polyline(segLatLngs, {
-        color: '#D97706', // Amber highlight
-        weight: 8,
-        opacity: 0.9,
-        lineCap: 'round',
-        lineJoin: 'round',
-        interactive: false,
-      }).addTo(map);
+    if (!selectedSegment) return;
 
-      highlight.bindTooltip(
-        `Segment #${selectedSegment.index} (${selectedSegment.lengthMeters.toFixed(0)}m)`,
-        { direction: 'top' }
-      );
+    // Use the actual route geometry, not a straight endpoint connection.
+    const segLatLngs: [number, number][] =
+      selectedSegment.coordinates?.length >= 2
+        ? selectedSegment.coordinates.map(([lng, lat]) => [lat, lng])
+        : [
+            [selectedSegment.startLat, selectedSegment.startLng],
+            [selectedSegment.endLat, selectedSegment.endLng],
+          ];
 
-      selectedSegmentLayerRef.current = highlight;
-      map.panTo([selectedSegment.startLat, selectedSegment.startLng]);
-    }
+    // White outline.
+    const outline = L.polyline(segLatLngs, {
+      color: '#FFFFFF',
+      weight: 12,
+      opacity: 0.95,
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: false,
+    });
+
+    // Amber selection line.
+    const highlight = L.polyline(segLatLngs, {
+      color: '#D97706',
+      weight: 7,
+      opacity: 1,
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: false,
+    });
+
+    highlight.bindTooltip(
+      `Section #${selectedSegment.index} (${selectedSegment.lengthMeters.toFixed(0)}m)`,
+      { direction: 'top' }
+    );
+
+    // Keep both layers together so they can be reordered as one selection.
+    const segmentGroup = L.featureGroup([outline, highlight]).addTo(map);
+
+    selectedSegmentLayerRef.current = segmentGroup;
+
+    // Ensure the selected section is visible above the route.
+    segmentGroup.eachLayer((layer) => {
+      if (layer instanceof L.Polyline) {
+        layer.bringToFront();
+      }
+    });
+
+    map.panTo(segLatLngs[0]);
   }, [selectedSegment]);
 
   // Update Origin and Destination Markers
@@ -336,11 +376,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    // Clear old markers
     if (markerLayersRef.current.origin) {
       markerLayersRef.current.origin.remove();
       delete markerLayersRef.current.origin;
     }
+
     if (markerLayersRef.current.destination) {
       markerLayersRef.current.destination.remove();
       delete markerLayersRef.current.destination;
@@ -431,6 +471,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     // Remove previous polylines
     Object.values(routeLayersRef.current).forEach((layer) => layer.remove());
     Object.values(haloLayersRef.current).forEach((layer) => layer.remove());
+
     routeLayersRef.current = {};
     haloLayersRef.current = {};
 
@@ -441,6 +482,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     // Render each scenario
     features.forEach((feature) => {
       const scenario = feature.properties?.scenario || 'Unknown';
+
       const config = SCENARIO_STYLES[scenario] || {
         color: '#5A6860',
         label: scenario,
@@ -470,6 +512,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           lineJoin: 'round',
           interactive: false,
         }).addTo(map);
+
         haloLayersRef.current[scenario] = halo;
       }
 
@@ -503,6 +546,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           polyline.setStyle({ opacity: 0.85, weight: config.baseWeight + 1.5 });
         }
       });
+
       polyline.on('mouseout', () => {
         if (selectedScenario !== scenario) {
           polyline.setStyle({ opacity: 0.45, weight: config.baseWeight });
@@ -516,10 +560,21 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       }
     });
 
+    // Keep the selected segment above newly rendered route layers.
+    if (selectedSegmentLayerRef.current) {
+      selectedSegmentLayerRef.current.eachLayer((layer) => {
+        if (layer instanceof L.Polyline) {
+          layer.bringToFront();
+        }
+      });
+    }
+
     // Auto fit bounds with gentle padding
     if (allLatLngs.length > 0) {
       map.invalidateSize();
+
       const bounds = L.latLngBounds(allLatLngs);
+
       if (bounds.isValid()) {
         map.fitBounds(bounds, {
           padding: [30, 30],
@@ -533,11 +588,26 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   // Re-order active scenario to front when selection changes
   useEffect(() => {
     if (!selectedScenario) return;
+
     const activeLayer = routeLayersRef.current[selectedScenario];
+
     if (activeLayer) {
       activeLayer.bringToFront();
     }
   }, [selectedScenario]);
+
+  // Keep the selected segment above the active route.
+  useEffect(() => {
+    const segmentGroup = selectedSegmentLayerRef.current;
+
+    if (!segmentGroup || !selectedSegment) return;
+
+    segmentGroup.eachLayer((layer) => {
+      if (layer instanceof L.Polyline) {
+        layer.bringToFront();
+      }
+    });
+  }, [selectedSegment, features, selectedScenario]);
 
   // Fit bounds helper
   const handleResetView = () => {
@@ -546,16 +616,21 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
     if (features && features.length > 0) {
       const allLatLngs: [number, number][] = [];
+
       features.forEach((f) =>
         f.geometry.coordinates.forEach((c) => allLatLngs.push([c[1], c[0]]))
       );
+
       if (allLatLngs.length > 0) {
         map.fitBounds(L.latLngBounds(allLatLngs), { padding: [30, 30] });
         return;
       }
     }
 
-    map.setView([PHOENIX_STUDY_BOUNDS.centerLat, PHOENIX_STUDY_BOUNDS.centerLng], 14);
+    map.setView(
+      [PHOENIX_STUDY_BOUNDS.centerLat, PHOENIX_STUDY_BOUNDS.centerLng],
+      14
+    );
   };
 
   const activeEnvCount = Object.values(envLayersState).filter(Boolean).length;
@@ -603,6 +678,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 <span className="font-display text-xs font-bold text-[#202522] uppercase tracking-wider">
                   Environmental Layers
                 </span>
+
                 <button
                   onClick={() => setShowEnvMenu(false)}
                   className="text-[#5A6860] hover:text-[#202522]"
@@ -616,6 +692,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   (key) => {
                     const cfg = ENV_LAYER_CONFIG[key];
                     const isOn = envLayersState[key];
+
                     return (
                       <div
                         key={key}
@@ -639,8 +716,12 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                             >
                               {isOn && <Check className="w-3 h-3" />}
                             </div>
-                            <span className="font-semibold text-[#202522] text-[11px] sm:text-xs">{cfg.name}</span>
+
+                            <span className="font-semibold text-[#202522] text-[11px] sm:text-xs">
+                              {cfg.name}
+                            </span>
                           </div>
+
                           <span className="font-mono text-[9px] sm:text-[10px] text-[#5A6860] bg-white px-1.5 py-0.5 rounded border border-[#E5E5DC]">
                             {cfg.range}
                           </span>
@@ -656,6 +737,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   <span className="text-[10px] font-mono text-[#5A6860]">
                     Layers active
                   </span>
+
                   <button
                     onClick={() =>
                       setEnvLayersState({
@@ -678,13 +760,17 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         {/* Basemap Switcher Button */}
         <button
           onClick={() =>
-            setTileSource((prev: 'carto' | 'osm') => (prev === 'carto' ? 'osm' : 'carto'))
+            setTileSource((prev: 'carto' | 'osm') =>
+              prev === 'carto' ? 'osm' : 'carto'
+            )
           }
-          title={`Switch Basemap Style`}
+          title="Switch Basemap Style"
           className="px-2 py-1.5 sm:px-2.5 sm:py-1.5 bg-white hover:bg-[#F7F7F3] text-[#202522] border border-[#E5E5DC] rounded-md shadow-xs transition-colors cursor-pointer text-[11px] sm:text-xs font-mono flex items-center gap-1"
         >
           <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#385E48]" />
-          <span className="hidden sm:inline">{tileSource === 'carto' ? 'Carto' : 'OSM'}</span>
+          <span className="hidden sm:inline">
+            {tileSource === 'carto' ? 'Carto' : 'OSM'}
+          </span>
         </button>
 
         {/* Reset View Button */}
@@ -697,13 +783,14 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         </button>
       </div>
 
-      {/* Scientific Labelling Note Banner (shown when any env layer is active) */}
+      {/* Scientific Labelling Note Banner */}
       {activeEnvCount > 0 && (
         <div className="absolute top-14 right-2 left-2 sm:top-16 sm:right-14 sm:left-auto z-[980] max-w-md bg-[#202522]/95 backdrop-blur-md text-white text-[10px] sm:text-[11px] font-mono p-2.5 sm:p-3 rounded-lg shadow-lg border border-[#385E48] space-y-1">
           <div className="flex items-center gap-1 font-bold text-[#86EFAC]">
             <Info className="w-3 h-3 shrink-0" />
             <span>Landsat Environmental Indicators (Phoenix 2025)</span>
           </div>
+
           <p className="text-zinc-300 leading-tight">
             LST is satellite surface temp, not pedestrian air temp (30m aligned grid). NDVI measures greenness, not direct shade.
           </p>
@@ -716,6 +803,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           <Layers className="w-3 h-3 text-[#385E48]" />
           <span>Route Scenarios</span>
         </div>
+
         <div className="space-y-1 text-[11px] sm:text-xs">
           <button
             onClick={() => onSelectScenario('Shortest')}
@@ -732,6 +820,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               />
               <span>Shortest</span>
             </div>
+
             <span className="font-mono text-[10px] text-[#5A6860]">λ=0</span>
           </button>
 
@@ -752,6 +841,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               />
               <span>Lower Exp</span>
             </div>
+
             <span className="font-mono text-[10px] text-[#5A6860]">λ=1</span>
           </button>
 
@@ -772,6 +862,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               />
               <span>Lowest Proxy</span>
             </div>
+
             <span className="font-mono text-[10px] text-[#385E48]">λ=2</span>
           </button>
         </div>
